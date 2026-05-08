@@ -1057,25 +1057,27 @@ static void dashApplyFilters()
     }
     else if (hwMode == 2)
     {
-        dashMcp->setFilterMask(MCP2515::MASK0, false, 0x7FF);
-        dashMcp->setFilter(MCP2515::RXF0, false, 921);
-        dashMcp->setFilter(MCP2515::RXF1, false, 1021);
-        dashMcp->setFilterMask(MCP2515::MASK1, false, 0x7FF);
-        dashMcp->setFilter(MCP2515::RXF2, false, 1016);
-        dashMcp->setFilter(MCP2515::RXF3, false, 280);
-        dashMcp->setFilter(MCP2515::RXF4, false, 1016);
-        dashMcp->setFilter(MCP2515::RXF5, false, 921);
+        // HW4: accept-all (mask=0) so diagnostic frames reach the handler.
+        dashMcp->setFilterMask(MCP2515::MASK0, false, 0x000);
+        dashMcp->setFilter(MCP2515::RXF0, false, 0);
+        dashMcp->setFilter(MCP2515::RXF1, false, 0);
+        dashMcp->setFilterMask(MCP2515::MASK1, false, 0x000);
+        dashMcp->setFilter(MCP2515::RXF2, false, 0);
+        dashMcp->setFilter(MCP2515::RXF3, false, 0);
+        dashMcp->setFilter(MCP2515::RXF4, false, 0);
+        dashMcp->setFilter(MCP2515::RXF5, false, 0);
     }
     else
     {
-        dashMcp->setFilterMask(MCP2515::MASK0, false, 0x7FF);
-        dashMcp->setFilter(MCP2515::RXF0, false, 1016);
-        dashMcp->setFilter(MCP2515::RXF1, false, 1021);
-        dashMcp->setFilterMask(MCP2515::MASK1, false, 0x7FF);
-        dashMcp->setFilter(MCP2515::RXF2, false, 1016);
-        dashMcp->setFilter(MCP2515::RXF3, false, 280);
-        dashMcp->setFilter(MCP2515::RXF4, false, 1016);
-        dashMcp->setFilter(MCP2515::RXF5, false, 1021);
+        // HW3: accept-all (mask=0) so diagnostic frames reach the handler.
+        dashMcp->setFilterMask(MCP2515::MASK0, false, 0x000);
+        dashMcp->setFilter(MCP2515::RXF0, false, 0);
+        dashMcp->setFilter(MCP2515::RXF1, false, 0);
+        dashMcp->setFilterMask(MCP2515::MASK1, false, 0x000);
+        dashMcp->setFilter(MCP2515::RXF2, false, 0);
+        dashMcp->setFilter(MCP2515::RXF3, false, 0);
+        dashMcp->setFilter(MCP2515::RXF4, false, 0);
+        dashMcp->setFilter(MCP2515::RXF5, false, 0);
     }
     dashMcp->setNormalMode();
     dashLog("[CFG] Filters set for " + String(hwMode == 0 ? "LEGACY" : hwMode == 1 ? "HW3"
@@ -1699,6 +1701,15 @@ static void dashReapplyFiltersWithPlugins()
 {
     if (!dashHandler || !dashDriver)
         return;
+    // If the handler wants full-bus listen (count==0), don't narrow the
+    // hardware filter even when plugins declare their own IDs. The driver's
+    // accept-all filter was established at init and is kept by passing
+    // count=0 here.
+    if (dashHandler->filterIdCount() == 0)
+    {
+        dashDriver->setFilters(nullptr, 0);
+        return;
+    }
     // Merge handler + plugin filter IDs
     uint32_t mergedIds[32];
     uint8_t count = 0;

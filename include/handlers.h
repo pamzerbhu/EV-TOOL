@@ -282,12 +282,13 @@ struct LegacyHandler : public CarManagerBase
 
 struct HW3Handler : public CarManagerBase
 {
-    const uint32_t *filterIds() const override
-    {
-        static constexpr uint32_t ids[] = {280, 390, 921, 1016, 1021, 2047};
-        return ids;
-    }
-    uint8_t filterIdCount() const override { return 6; }
+    // Full-bus listen: returning count=0 signals the driver to keep its
+    // accept-all filter. This lets diagnostic frames (0x370 EPAS, 0x27D APS,
+    // 0x3FE, 0x39D, 0x318, ...) reach the handler and plugin engine — the
+    // old 6-ID hard filter was masking them and blocking stable FSD
+    // activation on some vehicles.
+    const uint32_t *filterIds() const override { return nullptr; }
+    uint8_t filterIdCount() const override { return 0; }
 
     void handleMessage(CanFrame &frame, CanDriver &driver) override
     {
@@ -600,19 +601,9 @@ struct NagHandler : public CarManagerBase
 
 struct HW4Handler : public CarManagerBase
 {
-    const uint32_t *filterIds() const override
-    {
-#if defined(ISA_SPEED_CHIME_SUPPRESS) && !defined(ESP32_DASHBOARD)
-        static constexpr uint32_t ids[] = {280, 390, 921, 1016, 1021, 2047};
-        return ids;
-    }
-    uint8_t filterIdCount() const override { return 6; }
-#else
-        static constexpr uint32_t ids[] = {280, 390, 921, 1016, 1021, 2047};
-        return ids;
-    }
-    uint8_t filterIdCount() const override { return 6; }
-#endif
+    // Full-bus listen: see HW3Handler::filterIds().
+    const uint32_t *filterIds() const override { return nullptr; }
+    uint8_t filterIdCount() const override { return 0; }
 
     void handleMessage(CanFrame &frame, CanDriver &driver) override
     {

@@ -32,6 +32,8 @@ public:
 
     void setFilters(const uint32_t *ids, uint8_t count) override
     {
+        if (count == 0)
+            return; // full-bus: leave init-time accept-all in place
         mcp_.setConfigMode();
         mcp_.setFilterMask(MCP2515::MASK0, false, 0x7FF);
         mcp_.setFilter(MCP2515::RXF0, false, ids[0]);
