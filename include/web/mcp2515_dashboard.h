@@ -107,6 +107,18 @@ static unsigned long startMs = 0;
 static bool canOnline = false;
 static uint8_t followDist = 0;
 
+// ── FSD-trigger first-event diagnostics ───────────────────────────
+// One-shot logs on first arrival of key CAN IDs and first successful
+// bit-46 TX (0x3FD mux 0). Absence of 1st FSDmod (or large delta vs
+// 1st 3FD) points to a gate block (canActive / ADEnabled /
+// apInjectionGate / Parked / APActive).
+static bool diag1st3FD = false;
+static bool diag1st7FF = false;
+static bool diag1st280 = false;
+static bool diag1st921 = false;
+static bool diag1stFSDmod = false;
+static uint32_t diagFsdModCount = 0;
+
 static unsigned long fpsFrames = 0;
 static unsigned long fpsLastMs = 0;
 static float fps = 0.0f;
@@ -427,6 +439,29 @@ static void mcpDashOnFrame(const CanFrame &f)
     lastFrameMs = now;
     canOnline = true;
     fpsFrames++;
+    // First-event diagnostics: log the first arrival of IDs that gate
+    // FSD activation (cf. tesla-fsd-controller v1.4.35 log format).
+    if (!diag1st3FD && f.id == 1021)
+    {
+        diag1st3FD = true;
+        dashLog("[DIAG] 1st 3FD +" + String(now - startMs) + "ms");
+    }
+    if (!diag1st7FF && f.id == 2047)
+    {
+        diag1st7FF = true;
+        dashLog("[DIAG] 1st 7FF +" + String(now - startMs) + "ms");
+    }
+    if (!diag1st280 && f.id == 280)
+    {
+        diag1st280 = true;
+        dashLog("[DIAG] 1st 280 +" + String(now - startMs) + "ms");
+    }
+    if (!diag1st921 && f.id == 921)
+    {
+        diag1st921 = true;
+        uint8_t raw = (f.dlc > 0) ? f.data[0] : 0;
+        dashLog("[DIAG] 1st 921 +" + String(now - startMs) + "ms raw=" + String(raw));
+    }
     sniffPush(f);
     if (f.id == 1021 && f.dlc > 0)
     {
@@ -468,6 +503,20 @@ static void mcpDashOnTxFrame(const CanFrame &frame, bool ok)
 {
     txCount++;
     int8_t mux = dashFrameMux(frame);
+    // First-event diagnostic: first 0x3FD mux-0 TX with bit 46 set.
+    // bit 46 (byte 5, bit 6) is the FSD latch; absence of this log line
+    // means the injection path never wrote the latch.
+    if (ok && frame.id == 1021 && mux == 0 && frame.dlc >= 6 &&
+        (frame.data[5] & 0x40))
+    {
+        diagFsdModCount++;
+        if (!diag1stFSDmod)
+        {
+            diag1stFSDmod = true;
+            dashLog("[DIAG] 1st FSDmod +" + String(millis() - startMs) +
+                    "ms b46=1");
+        }
+    }
     if (!ok)
     {
         txErrCount++;
@@ -1550,6 +1599,29 @@ static void handleLog()
     }
     j += "]}";
     server.send(200, "application/json", j);
+}
+
+// Plain-text download of the full ring buffer. Useful for saving a
+// boot-to-crash timeline to share with reviewers side-by-side with
+// tesla-fsd-controller logs.
+static void handleLogDownload()
+{
+    dashDrainLogRing();
+    String body;
+    body.reserve(4096);
+    int start = (logCount < LOG_CAP) ? 0 : logHead;
+    int count = min(logCount, LOG_CAP);
+    for (int i = 0; i < count; i++)
+    {
+        int idx = (start + i) % LOG_CAP;
+        body += String(logBuf[idx].seq);
+        body += "\t";
+        body += logBuf[idx].msg;
+        body += "\n";
+    }
+    server.sendHeader("Content-Disposition",
+                      "attachment; filename=\"ev-tool-log.txt\"");
+    server.send(200, "text/plain; charset=utf-8", body);
 }
 
 static void handleResetStats()
@@ -4124,6 +4196,7 @@ static void mcpDashboardSetup(CarManagerBase *handler, CanDriver *driver)
     server.on("/logging", HTTP_POST, handleLoggingConfig);
     server.on("/frames", HTTP_GET, handleFrames);
     server.on("/log", HTTP_GET, handleLog);
+    server.on("/log/download", HTTP_GET, handleLogDownload);
     server.on("/reset_stats", HTTP_POST, handleResetStats);
     server.on("/rec_start", HTTP_POST, handleRecStart);
     server.on("/rec_stop", HTTP_POST, handleRecStop);
@@ -4173,6 +4246,14 @@ static void mcpDashboardSetup(CarManagerBase *handler, CanDriver *driver)
 #endif
 
     server.begin();
+    {
+        const char *hwName = (hwMode == 1) ? "HW3" :
+                             (hwMode == 2) ? "HW4" : "LEGACY";
+        dashLog(String("[BOOT] EV-TOOL ready hw=") + hwName +
+                " canAct=" + (canActive ? "1" : "0") +
+                " apGate=" + (apInjectionGate ? "1" : "0") +
+                " log_dl=/log/download");
+    }
     if (strlen(staSSID) > 0)
         dashScheduleSTAConnect(kDashStaBootDelayMs);
 #if CONFIG_FREERTOS_UNICORE
